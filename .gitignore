@@ -1,0 +1,8 @@
+# Environment variable
+.env
+
+# Log file
+*.log
+
+test.py
+__pycache__
