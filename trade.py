@@ -29,8 +29,11 @@ bybit.secret = os.environ["BYBIT_SECRET_KEY"]
 #bybit.proxy = FreeProxy(rand=True).get().replace("http://", "")
 
 # Function to execute the trading strategy
-def get_ma(coin, interval = 30):
-	ohlcvs = ((datetime.utcfromtimestamp(int(i[0]/1000)).strftime("%Y/%m/%d %H:%M:%S"), i[4]) for i in bybit.fetch_ohlcv("{}/USDT".format(coin), "1m")[-interval:])
+def get_ma(coin, exchange = bybit, interval = 30):
+	if exchange == "bybit":
+		ohlcvs = ((datetime.utcfromtimestamp(int(i[0]/1000)).strftime("%Y/%m/%d %H:%M:%S"), i[4]) for i in bybit.fetch_ohlcv("{}/USDT".format(coin), "1m")[-interval:])
+	elif exchange == "binance":
+		ohlcvs = ((datetime.utcfromtimestamp(int(i[0]/1000)).strftime("%Y/%m/%d %H:%M:%S"), i[4]) for i in binance.fetch_ohlcv("{}/BUSD".format(coin), "1m")[-interval:])
 	return(mean(ohlcv[1] for ohlcv in ohlcvs))
 def calc_price(coin, side):
 	return binance.fetch_order_book(symbol="{}/BUSD".format(coin))[side][0][0]
@@ -42,6 +45,20 @@ def calc_principal():
         elif amount != 0: # bids -> conservative amount
             res = res + calc_price(coin, "bids") * amount
     return res
+def convert_to_dict(strat):
+	# strat = (id, coin, settlement_price, settlement_amount, settlement_date, exchange, order_number, final_price, is_settled, margin_active)
+	strat_dict = {}
+	strat_dict['id'] = int(strat[0])
+	strat_dict['coin'] = strat[1]
+	strat_dict['settlement_price'] = float(strat[2])
+	strat_dict['settlement_amount'] = float(strat[3])
+	strat_dict['settlement_date'] = datetime.strptime(strat[4], "%Y-%m-%d %H:%M:%S")
+	strat_dict['exchange'] = strat[5]
+	strat_dict['order_number'] = strat[6]
+	strat_dict['final_price'] = strat[7]
+	strat_dict['is_settled'] = bool(strat[8])
+	strat_dict['margin_active'] = bool(strat[9])
+	return strat_dict
 def rebalance(id, coin, settlement_price, settlement_amount, order_number, margin_active):
 	if margin_active:
 	    # buy side -> asks for maker order
@@ -77,7 +94,7 @@ def rebalance(id, coin, settlement_price, settlement_amount, order_number, margi
 					print_n_log(msg)
 					asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, price))
 				else:
-					print_n_log("Keep watching trading strat id {}. Margin active: {}".format(id, margin_active))
+					print_n_log("Keep watching trading strat id {}. Margin active: {} Price: {}".format(id, margin_active, price))
 
 		# In 0.5% range between settlement price
 		elif (settlement_price * factor <= price) and (price < settlement_price):
@@ -90,7 +107,7 @@ def rebalance(id, coin, settlement_price, settlement_amount, order_number, margi
 				print_n_log(msg)
 				asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, price))
 			else:
-				print_n_log("Keep watching trading strat id {}. Margin active: {}".format(id, margin_active))
+				print_n_log("Keep watching trading strat id {}. Margin active: {} Price: {}".format(id, margin_active, price))
 		else: # price >= settlement_price
 			if order_number is None: # High volatiltiy case: market buy
 				binance.create_order(symbol="{}/BUSD".format(coin), type='market', side='buy', amount=settlement_amount)
@@ -120,11 +137,11 @@ def rebalance(id, coin, settlement_price, settlement_amount, order_number, margi
 		if price > settlement_price * factor:
 			# Sell back any fulfilled order if any and repay margin
 			if order_number is None:
-				print_n_log("Keep watching trading strat id {}. Margin active: {}".format(id, margin_active))
+				print_n_log("Keep watching trading strat id {}. Margin active: {} Price: {}".format(id, margin_active, price))
 			else:
 				fulfilled= binance.fetch_order(order_number, symbol="{}/BUSD".format(coin))['filled']
 				if fulfilled > 0:
-					binance.create_order(symbol="{}/BUSD".format(coin), type='market', side='buy', amount=fulfilled))
+					binance.create_order(symbol="{}/BUSD".format(coin), type='market', side='buy', amount=fulfilled)
 
 					msg = "Market bought {} with amount {}".format(coin, fulfilled)
 					print_n_log(msg)
@@ -152,7 +169,7 @@ def rebalance(id, coin, settlement_price, settlement_amount, order_number, margi
 				print_n_log(msg)
 				asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, price))
 			else:
-				print_n_log("Keep watching trading strat id {}. Margin active: {}".format(id, margin_active))
+				print_n_log("Keep watching trading strat id {}. Margin active: {} Price: {}".format(id, margin_active, price))
 
 	    # price <= settlementment_price
 		else:
@@ -247,9 +264,9 @@ def settle(id, coin, settlement_price, settlement_amount, exchange, final_price,
 					settle_trade(id)
 				else:
 					print_n_log("Coins not arrived yet.")
-
+ 
 # main function
-def thread_2():
+def main():
 	while True:
 		try:
 			#current_datetime = datetime.now()
@@ -260,12 +277,14 @@ def thread_2():
 			epoch_interval = 12
 
 			for strat in current_strats:
-			# strat = (id, coin, settlement_price, settlement_amount, settlement_date, exchange, order_number, final_price, is_settled, margin_active)
-				if datetime.now() > strat[4]:
+				# strat = (id, coin, settlement_price, settlement_amount, settlement_date, exchange, order_number, final_price, is_settled, margin_active)
+				# type conversion
+				strat = convert_to_dict(strat)
+				if datetime.now() > strat['settlement_date']:
 					# Run until principal is received
-					settle(strat[0], strat[1], strat[2], strat[3], strat[5], strat[9])
+					settle(strat['id'], strat['coin'], strat['settlement_price'], strat['settlement_amount'], strat['exchange'], strat['is_settled'])
 				else:
-					rebalance(strat[0], strat[1], strat[2], strat[3], strat[6], strat[8])
+					rebalance(strat['id'], strat['coin'], strat['settlement_price'], strat['settlement_amount'], strat['order_number'], strat['margin_active'])
 
 			time.sleep(epoch_interval)
 			#if (current_datetime - last_proxy_rotation_time).total_seconds() > proxy_rotation_interval:
@@ -274,9 +293,9 @@ def thread_2():
 			#	bybit.proxy = FreeProxy(rand=True).get().replace("http://", "")
 			#	last_proxy_rotation_time = current_datetime
 		except Exception as e:
-			raise Exception(e)
+			print(e)
 		#except ccxt.RequestTimeout as e:
 		#	binance.proxy = FreeProxy(rand=True).get().replace("http://", "")
 
 if __name__ == "__main__":
-	thread_2()
+	main()

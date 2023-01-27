@@ -1,12 +1,14 @@
 import sqlite3
+import os
 
 def create_dual_trading_db():
-    con = sqlite3.connect('strats.db')
-    cur = con.cursor()
-    # Create table
-    cur.execute("CREATE TABLE dual_trading (id PRIMARY KEY, coin NOT NULL, price NOT NULL, amount NOT NULL, date NOT NULL, exchange NOT NULL, order_no, final_price, settled NOT NULL, below_settlement NOT NULL)")
-    con.commit()
-    con.close()
+    if not(os.path.isfile("./strats.db")):
+        con = sqlite3.connect('strats.db')
+        cur = con.cursor()
+        # Create table
+        cur.execute("CREATE TABLE dual_trading (id PRIMARY KEY, coin NOT NULL, price NOT NULL, amount NOT NULL, date NOT NULL, exchange NOT NULL, order_no, final_price, settled NOT NULL, below_settlement NOT NULL)")
+        con.commit()
+        con.close()
 def remove_dual_trading_db():
     con = sqlite3.connect('strats.db')
     cur = con.cursor()

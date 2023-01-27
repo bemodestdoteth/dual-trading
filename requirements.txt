@@ -1,0 +1,5 @@
+aiohttp==3.8.3
+ccxt==2.6.94
+fp==0.2
+python-dotenv==0.21.1
+telegram==0.0.1
