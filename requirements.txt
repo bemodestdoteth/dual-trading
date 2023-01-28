@@ -1,5 +1,7 @@
 aiohttp==3.8.3
 ccxt==2.6.94
-fp==0.2
+lxml==4.9.2
 python-dotenv==0.21.1
+requests==2.28.2
 telegram==0.0.1
+websockets==10.4
