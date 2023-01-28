@@ -10,21 +10,19 @@ from api_setting import binanceapi, bybitapi
 from datetime import datetime
 from statistics import mean
 import asyncio
+import websockets
+import json
 import time
 import os
 
 # Load environment variables and exchange api data
 load_dotenv()
-binance = ccxt.binance()
-binance.apiKey = os.environ["BINANCE_API_KEY"]
-binance.secret = os.environ["BINANCE_SECRET_KEY"]
-
 bybit = ccxt.bybit()
 bybit.options["defaultType"] = "spot"
 bybit.apiKey = os.environ["BYBIT_API_KEY"]
 bybit.secret = os.environ["BYBIT_SECRET_KEY"]
 
-_binance = binanceapi()
+binance = binanceapi()
 _bybit = bybitapi()
 
 # Function to execute the trading strategy
@@ -35,12 +33,12 @@ def get_ma(coin, exchange = bybit, interval = 30):
 		ohlcvs = ((datetime.utcfromtimestamp(int(i[0]/1000)).strftime("%Y/%m/%d %H:%M:%S"), i[4]) for i in binance.fetch_ohlcv("{}/BUSD".format(coin), "1m")[-interval:])
 	return(mean(ohlcv[1] for ohlcv in ohlcvs))
 def calc_price(coin, side):
-	res = asyncio.run(_binance.HTTP_public_request("GET", "/api/v3/depth", {
+	res = asyncio.run(binance.HTTP_public_request("GET", "/api/v3/depth", {
 		"symbol": "{}BUSD".format(coin)
 	}))
 	return float(res[side][0][0])
 def calc_principal():
-    res = asyncio.run(_binance.HTTP_private_request("GET", "/sapi/v1/margin/account"))['totalAssetOfBtc']
+    res = asyncio.run(binance.HTTP_private_request("GET", "/sapi/v1/margin/account"))['totalAssetOfBtc']
     return (float(res) * calc_price("BTC", "bids"))
 def convert_to_dict(strat):
 	# strat = (id, coin, settlement_price, settlement_amount, settlement_date, exchange, order_number, final_price, is_settled, margin_active)
@@ -56,210 +54,7 @@ def convert_to_dict(strat):
 	strat_dict['is_settled'] = bool(strat[8])
 	strat_dict['margin_active'] = bool(strat[9])
 	return strat_dict
-def rebalance(id, coin, settlement_price, settlement_amount, order_number, margin_active):
-	if margin_active:
-	    # buy side -> asks for maker order
-		price = calc_price(coin, "asks")
 
-		# Safe
-		if price < settlement_price:
-			# Sell back any fulfilled order if any
-			if order_number is None:
-				# Create a new limit buy order if there's no order number right now
-				order = asyncio.run(_binance.HTTP_private_request("POST", "/api/v3/order", {
-						"symbol": "{}BUSD".format(coin),
-						"side": "BUY",
-						"type": "STOP_LOSS_LIMIT",
-						"timeInForce": "GTC",
-						"quantity": settlement_amount,
-						"price": settlement_price,
-						"stopPrice": settlement_price
-					}))
-				update_order_number(id, order['orderId'])
-
-				msg = "Limit buy order number {} created for {}".format(order['orderId'], coin)
-				print_n_log(msg)
-				asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, price, margin_active))
-			else:
-				fulfilled = float(asyncio.run(_binance.HTTP_private_request("GET", "/api/v3/order", {
-					"symbol": "{}BUSD".format(coin),
-					"orderId" : order_number
-					}))['executedQty'])
-				if fulfilled > 0:
-					asyncio.run(_binance.HTTP_private_request("POST", "/api/v3/order", {
-						"symbol": "{}BUSD".format(coin),
-						"side": "SELL",
-						"type": "MARKET",
-						"quantity": fulfilled
-						}))
-
-					msg = "Market sold {} with amount {}".format(coin, fulfilled)
-					print_n_log(msg)
-					asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, calc_price(coin, "bids"), margin_active))
-
-					# Refresh order number by re-creating an order
-					asyncio.run(_binance.HTTP_private_request("DELETE", "/api/v3/order", {
-						"symbol": "{}BUSD".format(coin),
-						"orderId": order_number
-						}))
-					order = asyncio.run(_binance.HTTP_private_request("POST", "/api/v3/order", {
-							"symbol": "{}BUSD".format(coin),
-							"side": "BUY",
-							"type": "STOP_LOSS_LIMIT",
-							"timeInForce": "GTC",
-							"quantity": settlement_amount,
-							"price": settlement_price,
-							"stopPrice": settlement_price
-						}))
-					update_order_number(id, order['orderId'])
-
-					msg = "Limit buy order number {} created for {}".format(order['orderId'], coin)
-					print_n_log(msg)
-					asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, price, margin_active))
-				else:
-					print_n_log("Keep watching trading strat id {}. Margin active: {} Price: {}".format(id, margin_active, price, margin_active))
-		else: # price >= settlement_price
-			if order_number is None: # High volatiltiy case: market buy
-				asyncio.run(_binance.HTTP_private_request("POST", "/api/v3/order", {
-					"symbol": "{}BUSD".format(coin),
-					"side": "BUY",
-					"type": "MARKET",
-					"quantity": settlement_amount
-					}))
-
-				toggle_margin(id, False)
-				msg = "Market bought {} with amount {}".format(coin, settlement_amount)
-				print_n_log(msg)
-				asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, price, margin_active))
-			else:
-				fulfilled = float(asyncio.run(_binance.HTTP_private_request("GET", "/api/v3/order", {
-					"symbol": "{}BUSD".format(coin),
-					"orderId" : order_number
-					}))['executedQty'])
-				if fulfilled == settlement_amount:
-					update_order_number(id, None)
-
-					toggle_margin(id, False)
-					msg = "Limit buy order {} for {} fully fulfilled".format(order_number, coin)
-					print_n_log(msg)
-					asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, price, margin_active))
-				else:
-					# Should not reach
-					asyncio.run(send_notification("Anomaly: Order not fully fulfilled even if price goes above the limit buy price"))
-	elif not(margin_active):
-		# sell side -> bids
-		price = calc_price(coin, "bids")
-		factor = 1.001 # 0.1%
-		# Safe
-		if price > (settlement_price * factor):
-			# Sell back any fulfilled order
-			if order_number is None:
-				print_n_log("Keep watching trading strat id {}. Margin active: {} Price: {}".format(id, margin_active, price))
-			else:
-				fulfilled = float(asyncio.run(_binance.HTTP_private_request("GET", "/api/v3/order", {
-					"symbol": "{}BUSD".format(coin),
-					"orderId" : order_number
-					}))['executedQty'])
-				if fulfilled > 0:
-					asyncio.run(_binance.HTTP_private_request("POST", "/api/v3/order", {
-						"symbol": "{}BUSD".format(coin),
-						"side": "BUY",
-						"type": "MARKET",
-						"quantity": fulfilled
-						}))
-
-					msg = "Market bought {} with amount {}".format(coin, fulfilled)
-					print_n_log(msg)
-					asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, calc_price(coin, "asks"), margin_active))
-
-					# Delete partially created order
-					asyncio.run(_binance.HTTP_private_request("DELETE", "/api/v3/order", {
-						"symbol": "{}BUSD".format(coin),
-						"orderId": order_number
-						}))
-				# Repay margin
-				asyncio.run(_binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
-					"asset": "{}".format(coin),
-					"amount": settlement_amount,
-					"type": 1 # 1: spot to margin, 2: margin to spot
-				}))
-				asyncio.run(_binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
-					"asset": "{}".format(coin),
-					"amount": settlement_amount
-				}))
-
-				msg = "{} Margin repaied".format(coin)
-				print_n_log(msg)
-				asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, calc_price(coin, "asks"), margin_active))
-		# In 0.5% range between settlement price
-		elif (price > settlement_price) and (price <= settlement_price * factor):
-			if order_number is None:
-				# Borror margin and create limit sell maker order
-				asyncio.run(_binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
-					"asset": "{}".format(coin),
-					"amount": settlement_amount
-				}))
-				asyncio.run(_binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
-					"asset": "{}".format(coin),
-					"amount": settlement_amount,
-					"type": 2 # 1: spot to margin, 2: margin to spot
-				}))
-				order = asyncio.run(_binance.HTTP_private_request("POST", "/api/v3/order", {
-						"symbol": "{}BUSD".format(coin),
-						"side": "SELL",
-						"type": "STOP_LOSS_LIMIT",
-						"timeInForce": "GTC",
-						"quantity": settlement_amount,
-						"price": settlement_price,
-						"stopPrice": settlement_price
-					}))
-				update_order_number(id, order['orderId'])
-				
-				msg = "Limit sell order number {} created for {}".format(order['orderId'], coin)
-				print_n_log(msg)
-				asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, price, margin_active))
-			else:
-				print_n_log("Keep watching trading strat id {}. Margin active: {} Price: {}".format(id, margin_active, price))
-	    # price <= settlementment_price
-		else:
-			# High volatility case: Borrow and market sell
-			if order_number is None:
-				asyncio.run(_binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
-					"asset": "{}".format(coin),
-					"amount": settlement_amount
-				}))
-				asyncio.run(_binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
-					"asset": "{}".format(coin),
-					"amount": settlement_amount,
-					"type": 2 # 1: spot to margin, 2: margin to spot
-				}))
-				asyncio.run(_binance.HTTP_private_request("POST", "/api/v3/order", {
-					"symbol": "{}BUSD".format(coin),
-					"side": "SELL",
-					"type": "MARKET",
-					"quantity": settlement_amount
-					}))
-
-				toggle_margin(id, True)
-				msg = "Market sold {} with amount {}".format(coin, settlement_amount)
-				print_n_log(msg)
-				asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, price, margin_active))
-			else:
-				# An outstanding order is fully fulfilled
-				fulfilled = float(asyncio.run(_binance.HTTP_private_request("GET", "/api/v3/order", {
-					"symbol": "{}BUSD".format(coin),
-					"orderId" : order_number
-					}))['executedQty'])
-				if fulfilled == settlement_amount:
-					update_order_number(id, None)
-
-					toggle_margin(id, True)
-					msg = "Limit sell order {} for {} fully fulfilled".format(order_number, coin)
-					print_n_log(msg)
-					asyncio.run(send_buy_sell_message(msg, id, settlement_price, settlement_price, price, margin_active))
-				else:
-					# Should not reach
-					asyncio.run(send_notification("Anomaly: Order not fully fulfilled even if price goes below the limit sell price"))
 def settle(id, coin, settlement_price, settlement_amount, exchange, final_price, margin_active):
     # Pass settlement time for the first time: determine final settlement status and handle some extreme cases
 	if final_price is None:
@@ -394,37 +189,114 @@ def settle(id, coin, settlement_price, settlement_amount, exchange, final_price,
 					print_n_log("USD not arrived yet.")
  
 # main function
-def main():
-	while True:
-		#current_datetime = datetime.now()
-		#proxy_rotation_interval = 600
-		#last_proxy_rotation_time = current_datetime
+async def main(coin, settlement_price, settlement_amount):
+	sold = False
+	borrowed = False
+	band = 0.005 # 0.5%
+	delay = 0.5
+	uri = "wss://stream.binance.com/ws/{}busd".format(coin.lower())
 
-		current_strats = get_not_settled_strats()
-		epoch_interval = 5
+	async with websockets.connect(uri) as websocket:
+		await websocket.send(json.dumps({
+			"method": "SUBSCRIBE",
+			"params": ["{}busd@depth@1000ms".format(coin.lower())],
+			"id": 1
+		}))
+		while True:
+			try:
+				res = json.loads(await websocket.recv())
+				if 'result' in res:
+					print("Not Fetched")
+				else:
+					try:
+						bid_price = float(tuple(filter(lambda b: float(b[1]) > 0, res['b']))[0][0])
+					except:
+						bid_price = 0
+					try:
+						ask_price = float(tuple(filter(lambda a: float(a[1]) > 0, res['a']))[0][0])
+					except:
+						ask_price = 0
 
-		for strat in current_strats:
-			# strat = (id, coin, settlement_price, settlement_amount, settlement_date, exchange, order_number, final_price, is_settled, margin_active)
-			# type conversion
-			strat = convert_to_dict(strat)
-			if datetime.now() > strat['settlement_date']:
-				# Run until principal is received
-				settle(strat['id'], strat['coin'], strat['settlement_price'], strat['settlement_amount'], strat['exchange'], strat['is_settled'])
-			else:
-				rebalance(strat['id'], strat['coin'], strat['settlement_price'], strat['settlement_amount'], strat['order_number'], strat['margin_active'])
-
-		time.sleep(epoch_interval)
-		#if (current_datetime - last_proxy_rotation_time).total_seconds() > proxy_rotation_interval:
-		#	print_n_log('Proxy change timer reached. Changing proxy...')
-		#	binance.proxy = FreeProxy(rand=True).get().replace("http://", "")
-		#	bybit.proxy = FreeProxy(rand=True).get().replace("http://", "")
-		#	last_proxy_rotation_time = current_datetime
-	#except ccxt.RequestTimeout as e:
-	#	binance.proxy = FreeProxy(rand=True).get().replace("http://", "")
+					# Less invertal if price is outside the band
+					if not sold:
+						if bid_price > settlement_price * (1 + band):
+							# Repay Margin
+							await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+								"asset": "{}".format(coin),
+								"amount": settlement_amount,
+								"type": 1 # 1: spot to margin, 2: margin to spot
+							})
+							await binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
+								"asset": "{}".format(coin),
+								"amount": settlement_amount
+							})
+							print_n_log("Repay Complete")
+							borrowed = False
+							delay = 30
+						elif bid_price > settlement_price and bid_price <= settlement_price * (1 + band):
+							if not borrowed:
+								# Borror Margin
+								await binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
+									"asset": "{}".format(coin),
+									"amount": settlement_amount
+								})
+								await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+									"asset": "{}".format(coin),
+									"amount": settlement_amount,
+									"type": 2 # 1: spot to margin, 2: margin to spot
+								})
+								print_n_log("Borrow Complete")
+								borrowed = True
+							delay = 0.5
+						else:
+							# High volatility case: borrow margin first
+							if not borrowed:
+								await binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
+									"asset": "{}".format(coin),
+									"amount": settlement_amount
+								})
+								await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+									"asset": "{}".format(coin),
+									"amount": settlement_amount,
+									"type": 2 # 1: spot to margin, 2: margin to spot
+								})
+								borrowed = True
+							# Market sell
+							await binance.HTTP_private_request("POST", "/api/v3/order", {
+								"symbol": "{}BUSD".format(coin),
+								"side": "SELL",
+								"type": "MARKET",
+								"quantity": settlement_amount
+							})
+							print_n_log("Sell Complete")
+							sold = True
+							delay = 0.5
+					else: # Sold, and borrowed at the first place
+						if ask_price < settlement_price * (1 - band):
+							delay = 30
+						elif bid_price >= settlement_price * (1 - band) and bid_price < settlement_price:
+							delay = 0.5
+						else:
+							# Market buy
+							await binance.HTTP_private_request("POST", "/api/v3/order", {
+								"symbol": "{}BUSD".format(coin),
+								"side": "BUY",
+								"type": "MARKET",
+								"quantity": settlement_amount
+							})
+							print_n_log("Sell Complete")
+							sold = False
+							delay = 0.5
+					print_n_log(bid_price)
+					print_n_log(ask_price)
+					print_n_log(res['E'] / 1000)
+					print_n_log(time.time())
+				print_n_log("-"*20)
+				time.sleep(delay)
+			except Exception as e:
+				print_n_log(e)
+				await send_error_message("Dual Trading Trading Part", e)
+				raise Exception(e)
 
 if __name__ == "__main__":
-    main()
-	#try:
-    #    main()
-    #except Exception as e:
-    #    asyncio.run(send_error_message("Dual Trading Trade Part", e))
+    asyncio.run(main("BTC", 22950, 0.0005))
