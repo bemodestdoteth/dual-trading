@@ -45,11 +45,11 @@ async def send_message(update_info):
 
     msg = '__*🔔{} has a new update\!🔔*__\n{}\n{}\n'.format(update_name, update_title, update_link)
     await bot.sendMessage(chat_id=chat_id, text=msg, parse_mode='markdownv2')
-async def send_buy_sell_message(header, id, price, amount, current_price):
+async def send_buy_sell_message(header, id, price, amount, current_price, margin_active):
     # Telegram bot configuration
     bot = telegram.Bot(token = os.environ['TELEGRAM_BOT_TOKEN'])
     chat_id = os.environ['TELEGRAM_CHAT_ID']
-    msg = '__*💸{}💸*__\nStrat id: {}\nOrder Price: {}\nAmount: {}\nCurrent Price: {}\n'.format(parse_markdown_v2(header), id, parse_markdown_v2(price), parse_markdown_v2(amount), parse_markdown_v2(current_price))
+    msg = '__*💸{}💸*__\nStrat id: {}\nOrder Price: {}\nAmount: {}\nCurrent Price: {}\nMargin Active: {}\n'.format(parse_markdown_v2(header), id, parse_markdown_v2(price), parse_markdown_v2(amount), parse_markdown_v2(current_price), parse_markdown_v2(margin_active))
     await bot.sendMessage(chat_id=chat_id, text=msg, parse_mode='markdownv2')
 async def send_error_message(work, msg):
     # Telegram bot configuration

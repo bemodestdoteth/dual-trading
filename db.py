@@ -10,11 +10,8 @@ def create_dual_trading_db():
         con.commit()
         con.close()
 def remove_dual_trading_db():
-    con = sqlite3.connect('strats.db')
-    cur = con.cursor()
-    # Create table
-    cur.execute("DROP TABLE dual_trading")
-    con.close()
+    if os.path.isfile('./strats.db'):
+        os.remove("strats.db")
 def insert_trading_strat(strat):
     con = sqlite3.connect('strats.db')
     cur = con.cursor()

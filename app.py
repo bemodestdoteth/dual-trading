@@ -1,11 +1,10 @@
 from telegram import Update
 from telegram.ext import Updater, Application, CommandHandler, ContextTypes
-from concurrent.futures import ThreadPoolExecutor
 from config import print_n_log, parse_markdown_v2, send_error_message
 from datetime import datetime
 from dotenv import load_dotenv
 from db import *
-from trade import calc_price, calc_principal, thread_2
+from trade_old import calc_price, calc_principal
 
 import asyncio
 import ccxt
@@ -87,11 +86,12 @@ async def edit_dual_trading(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reset_dual_trading(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         remove_dual_trading_db()
-        time.sleep(1)
         create_dual_trading_db()
-        update.message.reply_text("Cleared previous trading strat records", parse_mode='markdownv2')
+        await update.message.reply_text("Cleared previous trading strat records", parse_mode='markdownv2')
     except Exception as e:
         await update.message.reply_text(parse_markdown_v2(str(e)), parse_mode='markdownv2')
+
+# Main function
 def main():
     create_dual_trading_db()
 
@@ -105,40 +105,8 @@ def main():
     application.add_handler(CommandHandler("edit", edit_dual_trading))
     application.add_handler(CommandHandler("reset", reset_dual_trading))        
 
-    updater = Updater(os.environ['TELEGRAM_BOT_TOKEN'])
-
-    updater.dispatcher.add_handler(CommandHandler("launch", start_dual_trading))
-    updater.dispatcher.add_handler(CommandHandler("view", view_dual_trading))
-    updater.dispatcher.add_handler(CommandHandler("edit", edit_dual_trading))
-    updater.dispatcher.add_handler(CommandHandler("reset", reset_dual_trading))        
-
     # Start the Telegram server
-    updater.start_polling()
-
-# Main function
-async def amain():
-    try:
-        # Create the Application and pass it your bot's token.
-        async with Application.builder().token(os.environ['TELEGRAM_BOT_TOKEN']).build() as application:
-            # on different commands - answer in Telegram
-            application.add_handler(CommandHandler("launch", start_dual_trading))
-            application.add_handler(CommandHandler("view", view_dual_trading))
-            application.add_handler(CommandHandler("edit", edit_dual_trading))
-            application.add_handler(CommandHandler("reset", reset_dual_trading))
-
-            # Run the bot until the user presses Ctrl-C
-            await application.start()
-            await application.updater.start_polling()
-
-            from config import send_notification
-            import time
-            asyncio.run(await send_notification("test"))
-            #asyncio.run(await thread_2())
- 
-            await application.updater.stop()
-            await application.stop()
-    except Exception as e:
-        print(e)
+    application.run_polling()
 
 if __name__ == "__main__":
     try:
