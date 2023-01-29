@@ -316,7 +316,7 @@ async def main():
 									print_n_log("Database Refreshed")
 									counter = 0
 							else: # Sold, and borrowed at the first place
-								if ask_price >= strat.settlement_price
+								if ask_price >= strat.settlement_price:
 									# Market buy
 									await binance.HTTP_private_request("POST", "/api/v3/order", {
 										"symbol": "{}BUSD".format(strat.coin),
