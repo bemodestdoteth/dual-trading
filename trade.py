@@ -261,7 +261,6 @@ async def main():
 									})
 									print_n_log("Repay Complete")
 									strat.set_margin_active(False)
-								delay = 30
 							elif bid_price > strat.settlement_price and bid_price <= strat.settlement_price * (1 + band):
 								if not strat.margin_active:
 									# Borror Margin
@@ -276,7 +275,6 @@ async def main():
 									})
 									print_n_log("Borrow Complete")
 									strat.set_margin_active(True)
-								delay = 0.5
 							else:
 								# High volatility case: borrow margin first
 								if not strat.margin_active:
@@ -299,12 +297,11 @@ async def main():
 								})
 								print_n_log("Sell Complete")
 								strat.set_sold(True)
-								delay = 0.5
 						else: # Sold, and borrowed at the first place
 							if ask_price < strat.settlement_price * (1 - band):
-								delay = 30
+								pass
 							elif bid_price >= strat.settlement_price * (1 - band) and bid_price < strat.settlement_price:
-								delay = 0.5
+								pass
 							else:
 								# Market buy
 								await binance.HTTP_private_request("POST", "/api/v3/order", {
@@ -315,17 +312,16 @@ async def main():
 								})
 								print_n_log("Buy Complete")
 								strat.set_sold(False)
-								delay = 0.5
 					print_n_log(bid_price)
 					print_n_log(ask_price)
 					print_n_log(res['E'] / 1000)
 					print_n_log(time.time())
-				print_n_log("-"*20)
-				counter += delay
+				counter += 1
 				if counter >= 60: # Refresh strategy DB every 60 seconds
 					strats = refresh_strats()
 					print_n_log("Database Refreshed")
 					counter = 0
+				print_n_log("-"*20)
 				time.sleep(delay)
 			except Exception as e:
 				print_n_log(e)
