@@ -217,10 +217,12 @@ async def main():
 	await send_notification("Initializing...")
 
 	band = 0.001 # 0.1%
-	delay = 0.5
+
 	strats = refresh_strats()
 	print_n_log("Database Refreshed")
 	counter = 0
+
+	# Todo: accomodate two or more websocket streams
 	strat = strats[0]
 	uri = "wss://stream.binance.com/ws/{}busd".format(strat.coin.lower())
 	start_time = int(time.time())
@@ -333,9 +335,9 @@ async def main():
 						print_n_log(ask_price)
 						print_n_log(res['E'] / 1000)
 						print_n_log(time.time())
-				counter += 1
 
 				# Regularly refresh strategy DB every 60 seconds
+				counter += 1
 				if counter >= 60: 
 					strats = refresh_strats()
 					print_n_log("Database Refreshed")
@@ -346,11 +348,13 @@ async def main():
 					break
 
 				print_n_log("-"*20)
-				time.sleep(delay)
+				time.sleep(0.5)
 			except Exception as e:
 				print_n_log(e)
 				await send_error_message("Dual Trading Trading Part", e)
 
 if __name__ == "__main__":
+	# Wait until database is fully loaded
+	time.sleep(3)
 	while True:
 		asyncio.run(main())
