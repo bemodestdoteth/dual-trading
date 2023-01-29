@@ -6,7 +6,7 @@ def create_dual_trading_db():
         con = sqlite3.connect('strats.db')
         cur = con.cursor()
         # Create table
-        cur.execute("CREATE TABLE dual_trading (id PRIMARY KEY, coin NOT NULL, price NOT NULL, amount NOT NULL, date NOT NULL, exchange NOT NULL, order_no, final_price, settled NOT NULL, below_settlement NOT NULL)")
+        cur.execute("CREATE TABLE dual_trading (id PRIMARY KEY, coin NOT NULL, price NOT NULL, amount NOT NULL, date NOT NULL, exchange NOT NULL, order_no, final_price, settled NOT NULL, margin_active NOT NULL, sold NOT NULL)")
         con.commit()
         con.close()
 def remove_dual_trading_db():
@@ -15,7 +15,7 @@ def remove_dual_trading_db():
 def insert_trading_strat(strat):
     con = sqlite3.connect('strats.db')
     cur = con.cursor()
-    cur.execute("INSERT INTO dual_trading VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", strat)
+    cur.execute("INSERT INTO dual_trading VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", strat)
     con.commit()
     con.close()
 def get_trading_strat(id):
@@ -72,11 +72,18 @@ def settle_trade(id):
     cur.execute(query, (id, ))
     con.commit()
     con.close()
-def toggle_margin(id, below_settlement):
+def toggle_margin(id, is_margin_active):
     con = sqlite3.connect('strats.db')
     cur = con.cursor()
-    query = "UPDATE dual_trading SET below_settlement = ? WHERE id = ?"
-    cur.execute(query, (below_settlement, id))
+    query = "UPDATE dual_trading SET margin_active = ? WHERE id = ?"
+    cur.execute(query, (is_margin_active, id))
+    con.commit()
+    con.close()
+def toggle_sold(id, is_sold):
+    con = sqlite3.connect('strats.db')
+    cur = con.cursor()
+    query = "UPDATE dual_trading SET sold = ? WHERE id = ?"
+    cur.execute(query, (is_sold, id))
     con.commit()
     con.close()
     

@@ -1,6 +1,6 @@
 from telegram import Update
 from telegram.ext import Updater, Application, CommandHandler, ContextTypes
-from config import print_n_log, parse_markdown_v2, send_error_message
+from config import print_n_log, parse_markdown_v2, send_notification, send_error_message
 from datetime import datetime
 from dotenv import load_dotenv
 from db import *
@@ -26,7 +26,7 @@ async def start_dual_trading(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if exchange not in ccxt.exchanges:
             await update.message.reply_text("Enter a valid exchange name")
         else:
-            insert_trading_strat((id, coin, price, amount, date, exchange, None, None, False, False))
+            insert_trading_strat((id, coin, price, amount, date, exchange, None, None, False, False, False))
             assets_in_management = sum(calc_price(strat[1], "bids") * float(strat[3]) for strat in (strats for strats in get_not_settled_strats()))
             assets_in_management_f = "{:,.2f}".format(assets_in_management)
             margin_balance = "{:,.2f}".format(calc_principal())
@@ -59,7 +59,11 @@ async def view_dual_trading(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 margin_active = "True"
             else:
                 margin_active = "False"
-            msg = "__*ⓘInformation of dual\-trading strat {}ⓘ*__\n*Coin Name* : {}\n*Settlement Price* : ${}\n*Settlement Amount* : {}\n*Settlement Date* : {}\n*Exchange*: {}\n*Last Order Number* : {}\n*Final Price* : {}\n*Settled* : {}\n*Margin Active* : {}".format(res[0], res[1], "{:,.4f}".format(float(res[2])).replace(".", "\."), parse_markdown_v2(res[3]), parse_markdown_v2(res[4]), res[5], res[6], res[7], settled, margin_active)
+            if res[10]:
+                sold = "True"
+            else:
+                sold = "False"
+            msg = "__*ⓘInformation of dual\-trading strat {}ⓘ*__\n*Coin Name* : {}\n*Settlement Price* : ${}\n*Settlement Amount* : {}\n*Settlement Date* : {}\n*Exchange*: {}\n*Last Order Number* : {}\n*Final Price* : {}\n*Settled* : {}\n*Margin Active* : {}\n*Sold* : {}".format(res[0], res[1], "{:,.4f}".format(float(res[2])).replace(".", "\."), parse_markdown_v2(res[3]), parse_markdown_v2(res[4]), res[5], res[6], res[7], settled, margin_active, sold)
             await update.message.reply_text(msg, parse_mode='markdownv2')
     except Exception as e:
         await update.message.reply_text(parse_markdown_v2(str(e)), parse_mode='markdownv2')
@@ -71,10 +75,10 @@ async def edit_dual_trading(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not res:
             await update.message.reply_text("Can't modify an empty table. Insert records first.")
         # Excluding id and settled column
-        elif len(splitted) < res - 5:
-            await update.message.reply_text("Not all arguments provided.\nRequired: {}\nProvided: {}".format(res - 5, len(splitted)))
-        elif len(splitted) > res - 5:
-            await update.message.reply_text("Too many arguments provided.\nRequired: {}\nProvided: {}".format(res - 5, len(splitted)))
+        elif len(splitted) < res - 6:
+            await update.message.reply_text("Not all arguments provided.\nRequired: {}\nProvided: {}".format(res - 6, len(splitted)))
+        elif len(splitted) > res - 6:
+            await update.message.reply_text("Too many arguments provided.\nRequired: {}\nProvided: {}".format(res - 6, len(splitted)))
         else:
             if splitted[-2]: # Date
                 temp = datetime.strptime(splitted[-2], "%Y/%m/%d")
@@ -93,6 +97,8 @@ async def reset_dual_trading(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # Main function
 def main():
+    os.chdir(os.path.dirname(__file__))
+    asyncio.run(send_notification("Initializing Message Part..."))
     create_dual_trading_db()
 
     """Start the bot."""
