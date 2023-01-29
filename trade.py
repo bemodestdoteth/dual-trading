@@ -214,7 +214,7 @@ def settle(strat):
 # main function
 async def main():
 	os.chdir(os.path.dirname(__file__))
-	await send_notification("Initializing...")
+	#await send_notification("Initializing...")
 
 	band = 0.001 # 0.1%
 
@@ -230,13 +230,16 @@ async def main():
 	async with websockets.connect(uri) as websocket:
 		await websocket.send(json.dumps({
 			"method": "SUBSCRIBE",
-			"params": ["{}busd@depth@1000ms".format(strat.coin.lower())],
+			"params": ["{}busd@aggTrade".format(strat.coin.lower())],
 			"id": 1
 		}))
 
 		while True:
 			try:
 				res = json.loads(await websocket.recv())
+				print(res)
+				time.sleep(0.1)
+				continue
 				if 'result' in res:
 					print("Not Fetched")
 				else:
@@ -249,6 +252,8 @@ async def main():
 					except:
 						ask_price = 0
 
+					price = (bid_price + ask_price) / 2
+
 					refresh_after_end = False
 					for strat in strats:
 						# Settle trade that is after the settlement date
@@ -257,7 +262,7 @@ async def main():
 							refresh_after_end = True
 						elif not strat.is_settled:
 							if not strat.sold:
-								if bid_price > strat.settlement_price * (1 + band):
+								if price > strat.settlement_price * (1 + band):
 									if strat.margin_active:
 										# Repay Margin
 										await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
@@ -272,7 +277,7 @@ async def main():
 										print_n_log("Repay Complete")
 										strat.set_margin_active(False)
 										refresh_after_end = True
-								elif bid_price > strat.settlement_price and bid_price <= strat.settlement_price * (1 + band):
+								elif price > strat.settlement_price and price <= strat.settlement_price * (1 + band):
 									if not strat.margin_active:
 										# Borror Margin
 										await binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
@@ -311,7 +316,7 @@ async def main():
 									strat.set_sold(True)
 									refresh_after_end = True
 							else: # Sold, and borrowed at the first place
-								if ask_price >= strat.settlement_price:
+								if price >= strat.settlement_price:
 									# Market buy
 									await binance.HTTP_private_request("POST", "/api/v3/order", {
 										"symbol": "{}BUSD".format(strat.coin),
@@ -322,10 +327,10 @@ async def main():
 									print_n_log("Buy Complete")
 									strat.set_sold(False)
 									refresh_after_end = True
-						print_n_log(bid_price)
-						print_n_log(ask_price)
-						print_n_log(res['E'] / 1000)
-						print_n_log(time.time())
+					#print_n_log(bid_price)
+					print_n_log(price)
+					print_n_log(res['E'] / 1000)
+					print_n_log(time.time())
 					# Refresh database if any of refreshing event occurs
 					if refresh_after_end:
 						strats = refresh_strats()
@@ -351,6 +356,6 @@ async def main():
 
 if __name__ == "__main__":
 	# Wait until database is fully loaded
-	time.sleep(3)
+	#time.sleep(3)
 	while True:
 		asyncio.run(main())
