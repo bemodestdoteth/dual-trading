@@ -218,9 +218,9 @@ async def main():
 
 	band = 0.005 # 0.5%
 	delay = 0.5
-	counter = 0
 	strats = refresh_strats()
 	print_n_log("Database Refreshed")
+	counter = 0
 	strat = strats[0]
 	uri = "wss://stream.binance.com/ws/{}busd".format(strat.coin.lower())
 	start_time = int(time.time())
@@ -253,6 +253,7 @@ async def main():
 							strat.settle()
 							strats = refresh_strats()
 							print_n_log("Database Refreshed")
+							counter = 0
 						elif not strat.is_settled:
 							if not strat.sold:
 								if bid_price > strat.settlement_price * (1 + band):
@@ -271,6 +272,7 @@ async def main():
 										strat.set_margin_active(False)
 										strats = refresh_strats()
 										print_n_log("Database Refreshed")
+										counter = 0
 								elif bid_price > strat.settlement_price and bid_price <= strat.settlement_price * (1 + band):
 									if not strat.margin_active:
 										# Borror Margin
@@ -287,6 +289,7 @@ async def main():
 										strat.set_margin_active(True)
 										strats = refresh_strats()
 										print_n_log("Database Refreshed")
+										counter = 0
 								else:
 									# High volatility case: borrow margin first
 									if not strat.margin_active:
@@ -311,6 +314,7 @@ async def main():
 									strat.set_sold(True)
 									strats = refresh_strats()
 									print_n_log("Database Refreshed")
+									counter = 0
 							else: # Sold, and borrowed at the first place
 								if ask_price < strat.settlement_price * (1 - band):
 									pass
@@ -328,13 +332,14 @@ async def main():
 									strat.set_sold(False)
 									strats = refresh_strats()
 									print_n_log("Database Refreshed")
+									counter = 0
 						print_n_log(bid_price)
 						print_n_log(ask_price)
 						print_n_log(res['E'] / 1000)
 						print_n_log(time.time())
 				counter += 1
 
-				# Refresh strategy DB every 60 seconds
+				# Regularly refresh strategy DB every 60 seconds
 				if counter >= 60: 
 					strats = refresh_strats()
 					print_n_log("Database Refreshed")
