@@ -4,7 +4,7 @@ from config import print_n_log, parse_markdown_v2, send_notification, send_error
 from datetime import datetime
 from dotenv import load_dotenv
 from db import *
-from trade_old import calc_price, calc_principal
+from trade import calc_price, calc_principal
 
 import asyncio
 import ccxt
