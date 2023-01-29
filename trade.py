@@ -214,7 +214,7 @@ def settle(strat):
 # main function
 async def main():
 	os.chdir(os.path.dirname(__file__))
-	#await send_notification("Initializing...")
+	await send_notification("Initializing...")
 
 	band = 0.001 # 0.1%
 
@@ -230,16 +230,13 @@ async def main():
 	async with websockets.connect(uri) as websocket:
 		await websocket.send(json.dumps({
 			"method": "SUBSCRIBE",
-			"params": ["{}busd@aggTrade".format(strat.coin.lower())],
+			"params": ["{}busd@depth@1000ms".format(strat.coin.lower())],
 			"id": 1
 		}))
 
 		while True:
 			try:
 				res = json.loads(await websocket.recv())
-				print(res)
-				time.sleep(0.1)
-				continue
 				if 'result' in res:
 					print("Not Fetched")
 				else:
@@ -356,6 +353,6 @@ async def main():
 
 if __name__ == "__main__":
 	# Wait until database is fully loaded
-	#time.sleep(3)
+	time.sleep(3)
 	while True:
 		asyncio.run(main())
