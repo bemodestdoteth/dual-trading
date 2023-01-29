@@ -213,12 +213,13 @@ def settle(strat):
 # main function
 async def main():
 	os.chdir(os.path.dirname(__file__))
-	#await send_notification("Initializing...")
+	await send_notification("Initializing...")
 
 	band = 0.005 # 0.5%
 	delay = 0.5
 	counter = 0
 	strats = refresh_strats()
+	strat = strats[0]
 	uri = "wss://stream.binance.com/ws/{}busd".format(strat.coin.lower())
 
 	async with websockets.connect(uri) as websocket:
@@ -247,18 +248,19 @@ async def main():
 						# Less invertal if price is outside the band
 						if not strat.sold:
 							if bid_price > strat.settlement_price * (1 + band):
-								# Repay Margin
-								await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
-									"asset": "{}".format(strat.coin),
-									"amount": strat.settlement_amount,
-									"type": 1 # 1: spot to margin, 2: margin to spot
-								})
-								await binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
-									"asset": "{}".format(strat.coin),
-									"amount": strat.settlement_amount
-								})
-								print_n_log("Repay Complete")
-								strat.set_margin_active(False)
+								if strat.margin_active:
+									# Repay Margin
+									await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+										"asset": "{}".format(strat.coin),
+										"amount": strat.settlement_amount,
+										"type": 1 # 1: spot to margin, 2: margin to spot
+									})
+									await binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
+										"asset": "{}".format(strat.coin),
+										"amount": strat.settlement_amount
+									})
+									print_n_log("Repay Complete")
+									strat.set_margin_active(False)
 								delay = 30
 							elif bid_price > strat.settlement_price and bid_price <= strat.settlement_price * (1 + band):
 								if not strat.margin_active:
