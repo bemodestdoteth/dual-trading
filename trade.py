@@ -216,7 +216,7 @@ async def main():
 	os.chdir(os.path.dirname(__file__))
 	await send_notification("Initializing...")
 
-	band = 0.005 # 0.5%
+	band = 0.001 # 0.1%
 	delay = 0.5
 	strats = refresh_strats()
 	print_n_log("Database Refreshed")
@@ -316,11 +316,7 @@ async def main():
 									print_n_log("Database Refreshed")
 									counter = 0
 							else: # Sold, and borrowed at the first place
-								if ask_price < strat.settlement_price * (1 - band):
-									pass
-								elif bid_price >= strat.settlement_price * (1 - band) and bid_price < strat.settlement_price:
-									pass
-								else:
+								if ask_price >= strat.settlement_price
 									# Market buy
 									await binance.HTTP_private_request("POST", "/api/v3/order", {
 										"symbol": "{}BUSD".format(strat.coin),
