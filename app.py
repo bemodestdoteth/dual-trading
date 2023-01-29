@@ -98,7 +98,6 @@ async def reset_dual_trading(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # Main function
 def main():
     os.chdir(os.path.dirname(__file__))
-    asyncio.run(send_notification("Initializing Message Part..."))
     create_dual_trading_db()
 
     """Start the bot."""
@@ -115,7 +114,4 @@ def main():
     application.run_polling()
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        asyncio.run(send_error_message("Dual Trading Message Part", e))
+    main()

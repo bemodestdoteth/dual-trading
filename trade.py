@@ -213,7 +213,7 @@ def settle(strat):
 # main function
 async def main():
 	os.chdir(os.path.dirname(__file__))
-	#await send_notification("Initializing Trading Part...")
+	#await send_notification("Initializing...")
 
 	band = 0.005 # 0.5%
 	delay = 0.5
