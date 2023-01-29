@@ -6,11 +6,8 @@ from dotenv import load_dotenv
 from db import *
 from trade import calc_price, calc_principal
 
-import asyncio
 import ccxt
 import os
-import time
-import threading
 
 load_dotenv()
 

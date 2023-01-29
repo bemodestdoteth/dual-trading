@@ -249,13 +249,12 @@ async def main():
 					except:
 						ask_price = 0
 
+					refresh_after_end = False
 					for strat in strats:
 						# Settle trade that is after the settlement date
 						if int(time.time()) >= time.mktime(strat.settlement_date.timetuple()):
 							strat.settle()
-							strats = refresh_strats()
-							print_n_log("Database Refreshed")
-							counter = 0
+							refresh_after_end = True
 						elif not strat.is_settled:
 							if not strat.sold:
 								if bid_price > strat.settlement_price * (1 + band):
@@ -272,9 +271,7 @@ async def main():
 										})
 										print_n_log("Repay Complete")
 										strat.set_margin_active(False)
-										strats = refresh_strats()
-										print_n_log("Database Refreshed")
-										counter = 0
+										refresh_after_end = True
 								elif bid_price > strat.settlement_price and bid_price <= strat.settlement_price * (1 + band):
 									if not strat.margin_active:
 										# Borror Margin
@@ -289,9 +286,7 @@ async def main():
 										})
 										print_n_log("Borrow Complete")
 										strat.set_margin_active(True)
-										strats = refresh_strats()
-										print_n_log("Database Refreshed")
-										counter = 0
+										refresh_after_end = True
 								else:
 									# High volatility case: borrow margin first
 									if not strat.margin_active:
@@ -314,9 +309,7 @@ async def main():
 									})
 									print_n_log("Sell Complete")
 									strat.set_sold(True)
-									strats = refresh_strats()
-									print_n_log("Database Refreshed")
-									counter = 0
+									refresh_after_end = True
 							else: # Sold, and borrowed at the first place
 								if ask_price >= strat.settlement_price:
 									# Market buy
@@ -328,13 +321,16 @@ async def main():
 									})
 									print_n_log("Buy Complete")
 									strat.set_sold(False)
-									strats = refresh_strats()
-									print_n_log("Database Refreshed")
-									counter = 0
+									refresh_after_end = True
 						print_n_log(bid_price)
 						print_n_log(ask_price)
 						print_n_log(res['E'] / 1000)
 						print_n_log(time.time())
+					# Refresh database if any of refreshing event occurs
+					if refresh_after_end:
+						strats = refresh_strats()
+						print_n_log("Database Refreshed")
+						counter = 0
 
 				# Regularly refresh strategy DB every 60 seconds
 				counter += 1
