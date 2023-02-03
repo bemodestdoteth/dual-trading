@@ -58,169 +58,185 @@ class Strat:
 		settle(self)
 		self.is_settled = True
 		settle_trade(self.id)
-def get_ma(coin, exchange = bybit, interval = 30):
-	if exchange == "bybit":
-		ohlcvs = ((datetime.utcfromtimestamp(int(i[0]/1000)).strftime("%Y/%m/%d %H:%M:%S"), i[4]) for i in bybit.fetch_ohlcv("{}/USDT".format(coin), "1m")[-interval:])
-	elif exchange == "binance":
-		ohlcvs = ((datetime.utcfromtimestamp(int(i[0]/1000)).strftime("%Y/%m/%d %H:%M:%S"), i[4]) for i in binance.fetch_ohlcv("{}/BUSD".format(coin), "1m")[-interval:])
-	return(mean(ohlcv[1] for ohlcv in ohlcvs))
 def calc_price(coin, side):
 	res = asyncio.run(binance.HTTP_public_request("GET", "/api/v3/depth", {
 		"symbol": "{}BUSD".format(coin)
 	}))
 	return float(res[side][0][0])
-def calc_principal():
-    res = asyncio.run(binance.HTTP_private_request("GET", "/sapi/v1/margin/account"))['totalAssetOfBtc']
-    return (float(res) * calc_price("BTC", "bids"))
 def refresh_strats():
 	strats = []
 	for strat in get_not_settled_strats():
 		strats.append(Strat(strat))
 	return strats
-# Todo
-def settle(strat):
+
+# main function
+async def settle(strat):
     # Pass settlement time for the first time: determine final settlement status and handle some extreme cases
 	if strat.final_price is None:
-		insert_final_price(id, get_ma(strat.coin))
+		ma_30_candles = await binance.HTTP_public_request("GET", "/api/v3/klines", {
+			"symbol": "{}BUSD".format("BTC"),
+			"interval": "1m"
+			})
+		ma_30 = mean(tuple(float(ma_30_ohlcv[4]) for ma_30_ohlcv in ma_30_candles)[0:30])
+
+		insert_final_price(strat.id, ma_30)
 
 		# Extreme case 1: price > settlement but margin active
-		if strat.final_price >= strat.settlement_price and strat.sold:
-				asyncio.run(binance.HTTP_private_request("POST", "/api/v3/order", {
+		if ma_30 > strat.settlement_price and strat.sold:
+				await binance.HTTP_private_request("POST", "/api/v3/order", {
 					"symbol": "{}BUSD".format(strat.coin),
 					"side": "BUY",
 					"type": "MARKET",
 					"quantity": strat.settlement_amount
-				}))
-				asyncio.run(binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+				})
+				await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
 					"asset": "{}".format(strat.coin),
 					"amount": strat.settlement_amount,
 					"type": 1 # 1: spot to margin, 2: margin to spot
-				}))
-				asyncio.run(binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
+				})
+				await binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
 					"asset": "{}".format(strat.coin),
 					"amount": strat.settlement_amount
-				}))
-				strat.set_margin_active("False")
+				})
+				print_n_log("Buy Complete")
+				print_n_log("Repay Complete")
+				strat.set_margin_active(False)
+				strat.set_sold(False)
 		# Extreme case 2: price <= settlement but not margin active
-		elif strat.final_price < strat.settlement_price and not(strat.margin_active):
-				asyncio.run(binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
+		elif ma_30 <= strat.settlement_price and not strat.sold:
+				await binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
 					"asset": "{}".format(strat.coin),
 					"amount": strat.settlement_amount
-				}))
-				asyncio.run(binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+				})
+				await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
 					"asset": "{}".format(strat.coin),
 					"amount": strat.settlement_amount,
 					"type": 2 # 1: spot to margin, 2: margin to spot
-				}))
-				asyncio.run(binance.HTTP_private_request("POST", "/api/v3/order", {
+				})
+				await binance.HTTP_private_request("POST", "/api/v3/order", {
 					"symbol": "{}BUSD".format(strat.coin),
 					"side": "SELL",
 					"type": "MARKET",
 					"quantity": strat.settlement_amount
-				}))
-				strat.set_margin_active("True")
+				})
+				print_n_log("Borrow Complete")
+				print_n_log("Sell Complete")
+				strat.set_margin_active(True)
+				strat.set_sold(True)
 	# After final price is inserted, wait until balance arrives
 	else:
-		if strat.margin_active:
+		if strat.sold:
 			if strat.exchange == "bybit": # Bybit: Sell received coin on earn account
-				balance = asyncio.run(_bybit.HTTP_private_request("GET", "/asset/v3/private/transfer/account-coin/balance/query", {
+				balance = await _bybit.HTTP_private_request("GET", "/asset/v3/private/transfer/account-coin/balance/query", {
 					"accountType": "INVESTMENT",
 					"coin": "USDT"
-				}))['result']['balance']['walletBalance']
+				})['result']['balance']['walletBalance']
 				if balance >= strat.settlement_amount:
 					print_n_log("Coins arrived")
 
 					bybit.transfer(strat.coin, balance, "investment", "spot")
 					bybit.create_order(symbol="{}/USDT".format(strat.coin), type='market', side='sell', amount=balance)
-					balance_usd = asyncio.run(_bybit.HTTP_private_request("GET", "/asset/v3/private/transfer/account-coin/balance/query", {
+					balance_usd = await _bybit.HTTP_private_request("GET", "/asset/v3/private/transfer/account-coin/balance/query", {
 						"accountType": "SPOT",
 						"coin": "USDT"
-					}))['result']['balance']['walletBalance']
+					})['result']['balance']['walletBalance']
 
 					bybit.transfer("USDT", balance_usd, "spot", "investment")
 
-					msg = "Market sold {} with amount {}".format(strat.coin, balance)
-					print_n_log(msg)
-					asyncio.run(send_buy_sell_message(msg, id, strat.settlement_price, strat.settlement_price, calc_price(strat.coin, "bids"), strat.margin_active))
-
 					# Buy coins and repay outstanding debt
-					asyncio.run(binance.HTTP_private_request("POST", "/api/v3/order", {
+					await binance.HTTP_private_request("POST", "/api/v3/order", {
 						"symbol": "{}BUSD".format(strat.coin),
 						"side": "BUY",
 						"type": "MARKET",
 						"quantity": strat.settlement_amount
-					}))
-					asyncio.run(binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+					})
+					await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
 						"asset": "{}".format(strat.coin),
 						"amount": strat.settlement_amount,
 						"type": 1 # 1: spot to margin, 2: margin to spot
-					}))
-					asyncio.run(binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
+					})
+					await binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
 						"asset": "{}".format(strat.coin),
 						"amount": strat.settlement_amount
-					}))
+					})
 
-					msg = "Market bought {} with amount {}".format(strat.coin, balance)
-					print_n_log(msg)
-					asyncio.run(send_buy_sell_message(msg, id, strat.settlement_price, strat.settlement_price, calc_price(strat.coin, "asks"), strat.margin_active))
-
-					settle_trade(id)
+					settle_trade(strat.id)
+					await send_notification("Trade Strategy ID {} settled.".format(strat.id))
 				else:
 					print_n_log("Coins not arrived yet.")
-			elif strat.exchange == "binance": # Binance: Directly repay debt with received coins
-				balance = asyncio.run(binance.HTTP_private_request("POST", "/sapi/v3/asset/getUserAsset", {"asset": "{}".format(strat.coin)}))[0]['free']
-
-				if balance >= strat.settlement_amount:
+			elif strat.exchange == "binance":
+				# Binance: Repay debt with received coins
+				balance = await binance.HTTP_private_request("POST", "/sapi/v3/asset/getUserAsset", {"asset": "{}".format(strat.coin)})
+				if balance != [] and float(balance[0]['free']) >= strat.settlement_amount:
 					print_n_log("Coins arrived")
 
-					asyncio.run(binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+					await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
 						"asset": "{}".format(strat.coin),
 						"amount": strat.settlement_amount,
 						"type": 1 # 1: spot to margin, 2: margin to spot
-					}))
-					asyncio.run(binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
+					})
+					await binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
 						"asset": "{}".format(strat.coin),
 						"amount": strat.settlement_amount
-					}))
-
-					settle_trade(id)
+					})
+					print_n_log("Repay Complete")
+					settle_trade(strat.id)
+					await send_notification("Trade Strategy ID {} settled. Repayed debt with received coins".format(strat.id))
 				else:
 					print_n_log("Coins not arrived yet.")
 			else:
 				raise Exception("No valid exchanges")
-		elif not(strat.margin_active):
+		elif not(strat.sold):
 			if strat.exchange == "bybit":
-				balance_usd = asyncio.run(_bybit.HTTP_private_request("GET", "/asset/v3/private/transfer/account-coin/balance/query", {
+				balance_usd = await _bybit.HTTP_private_request("GET", "/asset/v3/private/transfer/account-coin/balance/query", {
 					"accountType": "INVESTMENT",
 					"coin": "USDT"
-				}))['result']['balance']['walletBalance']
+				})['result']['balance']['walletBalance']
 
 				if balance_usd >= (calc_price(strat.coin, "bids") * strat.settlement_amount) * 0.99:
 					print_n_log("USD arrived")
-					settle_trade(id)
+					settle_trade(strat.id)
+					await send_notification("Trade Strategy ID {} settled.".format(strat.id))
 				else:
 					print_n_log("USD not arrived yet.")
 			elif strat.exchange == "binance":
-				balance_usd = asyncio.run(binance.HTTP_private_request("POST", "/sapi/v3/asset/getUserAsset", {
-					"asset": "{}".format("BUSD")
-				}))[0]['free']
-
-				if balance_usd >= (calc_price(strat.coin, "bids") * strat.settlement_amount) * 0.99:
-					print_n_log("USD arrived")
-					settle_trade(id)
-				else:
-					print_n_log("USD not arrived yet.")
-
-# main function
+					# Repay margin if margin active
+					if strat.margin_active:
+						await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+							"asset": "{}".format(strat.coin),
+							"amount": strat.settlement_amount,
+							"type": 1 # 1: spot to margin, 2: margin to spot
+						})
+						await binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
+							"asset": "{}".format(strat.coin),
+							"amount": strat.settlement_amount
+						})
+						print_n_log("Repay Complete")
+						strat.set_margin_active(False)
+						
+					# No further action required
+					settle_trade(strat.id)
+					await send_notification("Trade Strategy ID {} settled through receiving stablecoin. No further action required..".format(strat.id))
+			else:
+				raise Exception("No valid exchanges")
 async def main():
+	# Wait until database is fully loaded
+	time.sleep(1)
+
+	# Check valid strategy input before starting
+	strats = refresh_strats()
+	if len(strats) == 0:
+		print_n_log("No strategy input. Waiting until input...")
+		time.sleep(9)
+		return
+	print_n_log("Database Refreshed")
+	counter = 0
+
 	os.chdir(os.path.dirname(__file__))
 	await send_notification("Initializing...")
 
-	band = 0.001 # 0.1%
-
-	strats = refresh_strats()
-	print_n_log("Database Refreshed")
-	counter = 0
+	band_upper = 0.1 # 0.1%
+	band_lower = 0.00005 # 0.005%
 
 	# Todo: accomodate two or more websocket streams
 	strat = strats[0]
@@ -235,124 +251,134 @@ async def main():
 		}))
 
 		while True:
-			try:
-				res = json.loads(await websocket.recv())
-				if 'result' in res:
-					print("Not Fetched")
-				else:
-					try:
-						bid_price = float(tuple(filter(lambda b: float(b[1]) > 0, res['b']))[0][0])
-					except:
-						bid_price = 0
-					try:
-						ask_price = float(tuple(filter(lambda a: float(a[1]) > 0, res['a']))[0][0])
-					except:
-						ask_price = 0
+			res = json.loads(await websocket.recv())
+			if 'result' in res:
+				print("Not Fetched")
+			else:
+				try:
+					bid_price = float(tuple(filter(lambda b: float(b[1]) > 0, res['b']))[0][0])
+				except:
+					bid_price = 0
+				try:
+					ask_price = float(tuple(filter(lambda a: float(a[1]) > 0, res['a']))[0][0])
+				except:
+					ask_price = 0
 
-					price = (bid_price + ask_price) / 2
+				price = (bid_price + ask_price) / 2
 
-					refresh_after_end = False
-					for strat in strats:
-						# Settle trade that is after the settlement date
-						if int(time.time()) >= time.mktime(strat.settlement_date.timetuple()):
-							strat.settle()
-							refresh_after_end = True
-						elif not strat.is_settled:
-							if not strat.sold:
-								if price > strat.settlement_price * (1 + band):
-									if strat.margin_active:
-										# Repay Margin
-										await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
-											"asset": "{}".format(strat.coin),
-											"amount": strat.settlement_amount,
-											"type": 1 # 1: spot to margin, 2: margin to spot
-										})
-										await binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
-											"asset": "{}".format(strat.coin),
-											"amount": strat.settlement_amount
-										})
-										print_n_log("Repay Complete")
-										strat.set_margin_active(False)
-										refresh_after_end = True
-								elif price > strat.settlement_price and price <= strat.settlement_price * (1 + band):
-									if not strat.margin_active:
-										# Borror Margin
-										await binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
-											"asset": "{}".format(strat.coin),
-											"amount": strat.settlement_amount
-										})
-										await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
-											"asset": "{}".format(strat.coin),
-											"amount": strat.settlement_amount,
-											"type": 2 # 1: spot to margin, 2: margin to spot
-										})
-										print_n_log("Borrow Complete")
-										strat.set_margin_active(True)
-										refresh_after_end = True
-								else:
-									# High volatility case: borrow margin first
-									if not strat.margin_active:
-										await binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
-											"asset": "{}".format(strat.coin),
-											"amount": strat.settlement_amount
-										})
-										await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
-											"asset": "{}".format(strat.coin),
-											"amount": strat.settlement_amount,
-											"type": 2 # 1: spot to margin, 2: margin to spot
-										})
-										strat.set_margin_active(True)
-									# Market sell
-									await binance.HTTP_private_request("POST", "/api/v3/order", {
-										"symbol": "{}BUSD".format(strat.coin),
-										"side": "SELL",
-										"type": "MARKET",
-										"quantity": strat.settlement_amount
+				refresh_after_end = False
+				for strat in strats:
+					# Settle trade that is after the settlement date
+					if int(time.time()) >= time.mktime(strat.settlement_date.timetuple()):
+					#if counter >= 10:
+						await settle(strat)
+						refresh_after_end = True
+					#else:
+					elif not strat.is_settled:
+						if not strat.sold:
+							if price > strat.settlement_price * (1 + band_upper):
+								if strat.margin_active:
+									# Repay Margin
+									await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+										"asset": "{}".format(strat.coin),
+										"amount": strat.settlement_amount,
+										"type": 1 # 1: spot to margin, 2: margin to spot
 									})
-									print_n_log("Sell Complete")
-									strat.set_sold(True)
-									refresh_after_end = True
-							else: # Sold, and borrowed at the first place
-								if price >= strat.settlement_price:
-									# Market buy
-									await binance.HTTP_private_request("POST", "/api/v3/order", {
-										"symbol": "{}BUSD".format(strat.coin),
-										"side": "BUY",
-										"type": "MARKET",
-										"quantity": strat.settlement_amount
+									await binance.HTTP_private_request("POST", "/sapi/v1/margin/repay", {
+										"asset": "{}".format(strat.coin),
+										"amount": strat.settlement_amount
 									})
-									print_n_log("Buy Complete")
-									strat.set_sold(False)
+									print_n_log("Repay Complete")
+									strat.set_margin_active(False)
 									refresh_after_end = True
-					#print_n_log(bid_price)
-					print_n_log(price)
-					print_n_log(res['E'] / 1000)
-					print_n_log(time.time())
-					# Refresh database if any of refreshing event occurs
-					if refresh_after_end:
-						strats = refresh_strats()
-						print_n_log("Database Refreshed")
-						counter = 0
-
-				# Regularly refresh strategy DB every 60 seconds
-				counter += 1
-				if counter >= 60: 
+							elif price > strat.settlement_price * (1 + band_lower) and price <= strat.settlement_price * (1 + band_upper):
+								if not strat.margin_active:
+									# Borror Margin
+									await binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
+										"asset": "{}".format(strat.coin),
+										"amount": strat.settlement_amount
+									})
+									await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+										"asset": "{}".format(strat.coin),
+										"amount": strat.settlement_amount,
+										"type": 2 # 1: spot to margin, 2: margin to spot
+									})
+									print_n_log("Borrow Complete")
+									strat.set_margin_active(True)
+									refresh_after_end = True
+							else:
+								# High volatility case: borrow margin first
+								if not strat.margin_active:
+									await binance.HTTP_private_request("POST", "/sapi/v1/margin/loan", {
+										"asset": "{}".format(strat.coin),
+										"amount": strat.settlement_amount
+									})
+									await binance.HTTP_private_request("POST", "/sapi/v1/margin/transfer", {
+										"asset": "{}".format(strat.coin),
+										"amount": strat.settlement_amount,
+										"type": 2 # 1: spot to margin, 2: margin to spot
+									})
+									print_n_log("Borrow Complete")
+									strat.set_margin_active(True)
+								# Market sell
+								await binance.HTTP_private_request("POST", "/api/v3/order", {
+									"symbol": "{}BUSD".format(strat.coin),
+									"side": "SELL",
+									"type": "MARKET",
+									"quantity": strat.settlement_amount
+								})
+								print_n_log("Sell Complete")
+								strat.set_sold(True)
+								refresh_after_end = True
+						elif strat.sold: # Sold, and borrowed at the first place
+							if price >= strat.settlement_price * (1 - band_lower):
+								# Market buy
+								await binance.HTTP_private_request("POST", "/api/v3/order", {
+									"symbol": "{}BUSD".format(strat.coin),
+									"side": "BUY",
+									"type": "MARKET",
+									"quantity": strat.settlement_amount
+								})
+								print_n_log("Buy Complete")
+								strat.set_sold(False)
+								refresh_after_end = True
+				#print_n_log(bid_price)
+				print_n_log(price)
+				print_n_log(res['E'] / 1000)
+				print_n_log(time.time())
+				# Refresh database if any of refreshing event occurs
+				if refresh_after_end:
 					strats = refresh_strats()
+					if len(strats) == 0:
+						print_n_log("No strategy input. Waiting until input...")
+						time.sleep(9)
+						return
 					print_n_log("Database Refreshed")
 					counter = 0
-				# Refresh connection every 12 hours
-				if int(time.time()) - start_time >= 12 * 60 * 60:
-					print_n_log("Refreshing Connection")
-					break
 
-				print_n_log("-"*20)
-				time.sleep(0.5)
-			except Exception as e:
-				print_n_log(e)
-				await send_error_message("Dual Trading Trading Part", e)
+			# Regularly refresh strategy DB every 60 seconds
+			counter += 1
+			if counter >= 60: 
+				strats = refresh_strats()
+				if len(strats) == 0:
+					print_n_log("No strategy input. Waiting until input...")
+					time.sleep(9)
+					return
+				print_n_log("Database Refreshed")
+				counter = 0
+			# Refresh connection every 12 hours
+			if int(time.time()) - start_time >= 12 * 60 * 60:
+				print_n_log("Refreshing Connection")
+				break
+
+			print_n_log("-"*20)
+			time.sleep(0.5)
 
 if __name__ == "__main__":
-	# Wait until database is fully loaded
-	time.sleep(3)
-	while True:
-		asyncio.run(main())
+	asyncio.run(main())
+	# while True:
+	# 	try:
+	# 		 asyncio.run(main())
+	# 	except Exception as e:
+	#		print_n_log(e)
+	# 		asyncio.run(send_error_message("Dual Trading Trade Part", e))

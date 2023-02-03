@@ -1,10 +1,10 @@
+from api_setting import binanceapi
 from telegram import Update
-from telegram.ext import Updater, Application, CommandHandler, ContextTypes
-from config import print_n_log, parse_markdown_v2, send_notification, send_error_message
+from telegram.ext import Application, CommandHandler, ContextTypes
+from config import print_n_log, parse_markdown_v2
 from datetime import datetime
 from dotenv import load_dotenv
 from db import *
-from trade import calc_price, calc_principal
 
 import ccxt
 import os
@@ -23,10 +23,20 @@ async def start_dual_trading(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if exchange not in ccxt.exchanges:
             await update.message.reply_text("Enter a valid exchange name")
         else:
+            binance = binanceapi()
+            res = await binance.HTTP_private_request("GET", "/sapi/v1/margin/account")
+            btc_price = await binance.HTTP_public_request("GET", "/api/v3/depth", {
+                "symbol": "{}BUSD".format("BTC")
+            })
+            margin_balance = "{:,.2f}".format(float(res['totalAssetOfBtc']) * float(btc_price['bids'][0][0]))
+
             insert_trading_strat((id, coin, price, amount, date, exchange, None, None, False, False, False))
-            assets_in_management = sum(calc_price(strat[1], "bids") * float(strat[3]) for strat in (strats for strats in get_not_settled_strats()))
+
+            coin_price = btc_price = await binance.HTTP_public_request("GET", "/api/v3/depth", {
+                "symbol": "{}BUSD".format(coin)
+            })
+            assets_in_management = (sum(float(coin_price['bids'][0][0]) * float(strat[3]) for strat in (strats for strats in get_not_settled_strats())))
             assets_in_management_f = "{:,.2f}".format(assets_in_management)
-            margin_balance = "{:,.2f}".format(calc_principal())
             recommended_assets = "{:,.2f}".format(assets_in_management / 2)
 
             # 3x leverage -> recommended margin balance / 2
@@ -60,7 +70,7 @@ async def view_dual_trading(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sold = "True"
             else:
                 sold = "False"
-            msg = "__*ⓘInformation of dual\-trading strat {}ⓘ*__\n*Coin Name* : {}\n*Settlement Price* : ${}\n*Settlement Amount* : {}\n*Settlement Date* : {}\n*Exchange*: {}\n*Last Order Number* : {}\n*Final Price* : {}\n*Settled* : {}\n*Margin Active* : {}\n*Sold* : {}".format(res[0], res[1], "{:,.4f}".format(float(res[2])).replace(".", "\."), parse_markdown_v2(res[3]), parse_markdown_v2(res[4]), res[5], res[6], res[7], settled, margin_active, sold)
+            msg = "__*ⓘInformation of dual\-trading strat {}ⓘ*__\n*Coin Name* : {}\n*Settlement Price* : ${}\n*Settlement Amount* : {}\n*Settlement Date* : {}\n*Exchange*: {}\n*Last Order Number* : {}\n*Final Price* : {}\n*Settled* : {}\n*Margin Active* : {}\n*Sold* : {}".format(res[0], res[1], "{:,.4f}".format(float(res[2])).replace(".", "\."), parse_markdown_v2(res[3]), parse_markdown_v2(res[4]), res[5], res[6], parse_markdown_v2(res[7]), settled, margin_active, sold)
             await update.message.reply_text(msg, parse_mode='markdownv2')
     except Exception as e:
         await update.message.reply_text(parse_markdown_v2(str(e)), parse_mode='markdownv2')
