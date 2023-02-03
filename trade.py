@@ -372,6 +372,8 @@ async def main():
 			time.sleep(0.5)
 
 if __name__ == "__main__":
+    os.chdir(os.path.dirname(__file__))
+
 	while True:
 		if os.path.isfile("strats.db"):
 			try:
