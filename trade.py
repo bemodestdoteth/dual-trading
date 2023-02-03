@@ -378,7 +378,7 @@ if __name__ == "__main__":
 				asyncio.run(main())
 			except Exception as e:
 				print_n_log(e)
-				#asyncio.run(send_error_message("Dual Trading Trade Part", e))
+				asyncio.run(send_error_message("Dual Trading Trade Part", e))
 		else:
-			print("no database yet")
+			print_n_log("no database yet")
 			time.sleep(1)
