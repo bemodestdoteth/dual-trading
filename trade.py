@@ -220,14 +220,11 @@ async def settle(strat):
 			else:
 				raise Exception("No valid exchanges")
 async def main():
-	# Wait until database is fully loaded
-	time.sleep(1)
-
 	# Check valid strategy input before starting
 	strats = refresh_strats()
 	if len(strats) == 0:
 		print_n_log("No strategy input. Waiting until input...")
-		time.sleep(9)
+		time.sleep(10)
 		return
 	print_n_log("Database Refreshed")
 	counter = 0
@@ -351,7 +348,7 @@ async def main():
 					strats = refresh_strats()
 					if len(strats) == 0:
 						print_n_log("No strategy input. Waiting until input...")
-						time.sleep(9)
+						time.sleep(10)
 						return
 					print_n_log("Database Refreshed")
 					counter = 0
@@ -362,7 +359,7 @@ async def main():
 				strats = refresh_strats()
 				if len(strats) == 0:
 					print_n_log("No strategy input. Waiting until input...")
-					time.sleep(9)
+					time.sleep(10)
 					return
 				print_n_log("Database Refreshed")
 				counter = 0
@@ -376,8 +373,12 @@ async def main():
 
 if __name__ == "__main__":
 	while True:
-		try:
-			 asyncio.run(main())
-		except Exception as e:
-			print_n_log(e)
-			asyncio.run(send_error_message("Dual Trading Trade Part", e))
+		if os.path.isfile("strats.db"):
+			try:
+				asyncio.run(main())
+			except Exception as e:
+				print_n_log(e)
+				#asyncio.run(send_error_message("Dual Trading Trade Part", e))
+		else:
+			print("no database yet")
+			time.sleep(1)
