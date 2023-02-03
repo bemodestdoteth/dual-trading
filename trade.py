@@ -375,10 +375,9 @@ async def main():
 			time.sleep(0.5)
 
 if __name__ == "__main__":
-	asyncio.run(main())
-	# while True:
-	# 	try:
-	# 		 asyncio.run(main())
-	# 	except Exception as e:
-	#		print_n_log(e)
-	# 		asyncio.run(send_error_message("Dual Trading Trade Part", e))
+	while True:
+		try:
+			 asyncio.run(main())
+		except Exception as e:
+			print_n_log(e)
+			asyncio.run(send_error_message("Dual Trading Trade Part", e))
