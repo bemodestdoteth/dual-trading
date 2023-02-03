@@ -381,4 +381,4 @@ if __name__ == "__main__":
 				asyncio.run(send_error_message("Dual Trading Trade Part", e))
 		else:
 			print_n_log("no database yet")
-			time.sleep(1)
+			time.sleep(10)
