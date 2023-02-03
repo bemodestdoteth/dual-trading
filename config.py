@@ -7,11 +7,11 @@ import time
 def print_n_log(msg, is_error = False):
     if not(is_error):
         print("{}  {}".format(datetime.strftime(datetime.now(), format="%Y/%m/%d %H:%M:%S"), msg))
-        logging.basicConfig(filename='./dual-trading.log', filemode='w', format='%(asctime)s - %(name)s - %(message)s', level=logging.INFO)
+        logging.basicConfig(filename='./dual-trading.log', filemode='a', format='%(asctime)s - %(name)s - %(message)s', level=logging.INFO)
         logging.info(msg)
     else:
         print("{}  Error: {}".format(datetime.strftime(datetime.now(), format="%Y/%m/%d %H:%M:%S"), msg))
-        logging.basicConfig(filename='./dual-trading.log', filemode='w', format='%(asctime)s - %(name)s - %(message)s', level=logging.ERROR)
+        logging.basicConfig(filename='./dual-trading.log', filemode='a', format='%(asctime)s - %(name)s - %(message)s', level=logging.ERROR)
         logging.error(msg)
 def stopwatch(func):
     def inner(*args, **kwargs):
