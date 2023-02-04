@@ -339,10 +339,9 @@ async def main():
 								print_n_log("Buy Complete")
 								strat.set_sold(False)
 								refresh_after_end = True
-				#print_n_log(bid_price)
-				print_n_log(price)
-				print_n_log(res['E'] / 1000)
-				print_n_log(time.time())
+				print(price)
+				print(res['E'] / 1000)
+				print(time.time())
 				# Refresh database if any of refreshing event occurs
 				if refresh_after_end:
 					strats = refresh_strats()
@@ -368,7 +367,7 @@ async def main():
 				print_n_log("Refreshing Connection")
 				break
 
-			print_n_log("-"*20)
+			print("-"*20)
 			time.sleep(0.5)
 
 if __name__ == "__main__":
